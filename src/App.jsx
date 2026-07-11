@@ -15,7 +15,7 @@ import {
 const STORAGE_KEY = 'piano-flipnote-progress-v1'
 const SHEET_VISIBILITY_KEY = 'piano-flipnote-show-sheet-v1'
 const QUESTION_COUNT = 10
-const PIANO_SAMPLE_BASE = '/audio/piano'
+const PIANO_SAMPLE_BASE = `${import.meta.env.BASE_URL}audio/piano`
 const audioCache = new Map()
 const NATURAL_NOTE_NAMES = ['C', 'D', 'E', 'F', 'G', 'A', 'B']
 const TREBLE_FULL = [
