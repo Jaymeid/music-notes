@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
   ArrowLeft,
   BarChart3,
@@ -11,13 +11,22 @@ import {
   Volume2,
   X,
 } from 'lucide-react'
+import {
+  Accidental,
+  Formatter,
+  Renderer,
+  Stave,
+  StaveNote,
+  VexFlow,
+  Voice,
+} from 'vexflow/bravura'
 
 const STORAGE_KEY = 'piano-flipnote-progress-v1'
 const SHEET_VISIBILITY_KEY = 'piano-flipnote-show-sheet-v1'
 const QUESTION_COUNT = 10
 const PIANO_SAMPLE_BASE = `${import.meta.env.BASE_URL}audio/piano`
 const audioCache = new Map()
-const NATURAL_NOTE_NAMES = ['C', 'D', 'E', 'F', 'G', 'A', 'B']
+VexFlow.setFonts('Bravura', 'Academico')
 const TREBLE_FULL = [
   'C4',
   'D4',
@@ -63,11 +72,6 @@ const BASS_ACCIDENTALS = [...BASS_SHARPS, ...BASS_FLATS]
 const TREBLE_ACCIDENTAL_BASICS = ['C#4', 'Db4', 'D#4', 'Eb4', 'F#4', 'Gb4', 'G#4', 'Bb4']
 const BASS_ACCIDENTAL_BASICS = ['C#3', 'Db3', 'D#3', 'Eb3', 'F#3', 'Gb3', 'A#3', 'Bb3']
 
-function noteIndex(name) {
-  const [, letter, octave] = name.match(/^([A-G])(?:#|b)?(\d)$/)
-  return Number(octave) * NATURAL_NOTE_NAMES.length + NATURAL_NOTE_NAMES.indexOf(letter)
-}
-
 function noteFrequency(name) {
   const [, letter, accidental = '', octave] = name.match(/^([A-G])(#|b)?(\d)$/)
   const semitoneOffsets = { C: -9, D: -7, E: -5, F: -4, G: -2, A: 0, B: 2 }
@@ -97,17 +101,25 @@ function sampleName(name) {
 }
 
 function makeNote(name, clef) {
-  const index = noteIndex(name)
   return {
     id: `${clef}-${name}`,
     name,
     label: noteLabel(name),
     frequency: noteFrequency(name),
     clef,
-    step: clef === 'treble' ? 34 - index : 32 - index,
-    accidental: name.includes('#') ? '♯' : name.includes('b') ? '♭' : null,
     sample: sampleName(name),
   }
+}
+
+function vexflowKey(name) {
+  const [, pitch, octave] = name.match(/^([A-G](?:#|b)?)(\d)$/)
+  return `${pitch.toLowerCase()}/${octave}`
+}
+
+function vexflowAccidental(name) {
+  if (name.includes('#')) return '#'
+  if (name.includes('b')) return 'b'
+  return null
 }
 
 const NOTES = [
@@ -335,55 +347,58 @@ function summarizeProgress(progress) {
   }
 }
 
-function StaffPreview({ note, revealed }) {
-  const noteBase = note.clef === 'treble' ? 64 : 34
-  const staffTop = noteBase + 6
-  const top = noteBase + note.step * 8
-  const ledgerSteps =
-    note.step < 0
-      ? Array.from({ length: Math.ceil(Math.abs(note.step) / 2) }, (_, index) => -2 - index * 2)
-      : note.step > 8
-        ? Array.from({ length: Math.ceil((note.step - 8) / 2) }, (_, index) => 10 + index * 2)
-        : []
+function StaffPreview({ note }) {
+  const containerRef = useRef(null)
+
+  useEffect(() => {
+    const container = containerRef.current
+    if (!container) return
+
+    container.innerHTML = ''
+
+    try {
+      const renderer = new Renderer(container, Renderer.Backends.SVG)
+      renderer.resize(340, 150)
+
+      const context = renderer.getContext()
+      const stave = new Stave(18, 28, 300)
+      const staveNote = new StaveNote({
+        clef: note.clef,
+        keys: [vexflowKey(note.name)],
+        duration: 'q',
+        auto_stem: true,
+      })
+      const accidental = vexflowAccidental(note.name)
+
+      if (accidental) {
+        staveNote.addModifier(new Accidental(accidental), 0)
+      }
+
+      const voice = new Voice({ num_beats: 1, beat_value: 4 }).setMode(
+        Voice.Mode.SOFT,
+      )
+      voice.addTickables([staveNote])
+
+      stave.addClef(note.clef)
+      stave.setContext(context).draw()
+
+      new Formatter().joinVoices([voice]).format([voice], 150)
+      voice.draw(context, stave)
+
+      const svg = container.querySelector('svg')
+      if (svg) {
+        svg.setAttribute('aria-label', `${note.clef} clef ${note.name}`)
+        svg.setAttribute('role', 'img')
+      }
+    } catch (error) {
+      container.innerHTML = `<div class="text-sm font-medium text-slate-600" data-vexflow-error>Could not render ${note.name}</div>`
+      console.error(error)
+    }
+  }, [note])
 
   return (
-    <div className="relative mx-auto h-44 w-full max-w-sm overflow-hidden rounded-md border border-slate-200 bg-white px-8 py-5 shadow-inner dark:border-slate-700 dark:bg-slate-950">
-      <div
-        className="absolute left-5 text-5xl font-serif text-slate-300 dark:text-slate-600"
-        style={{ top: staffTop - 7 }}
-      >
-        {note.clef === 'treble' ? '𝄞' : '𝄢'}
-      </div>
-      {[0, 1, 2, 3, 4].map((line) => (
-        <div
-          key={line}
-          className="absolute left-16 right-8 h-px bg-slate-400 dark:bg-slate-500"
-          style={{ top: staffTop + line * 16 }}
-        />
-      ))}
-      {ledgerSteps.map((step) => (
-        <div
-          key={step}
-          className="absolute left-1/2 h-px w-16 -translate-x-1/2 bg-slate-400 dark:bg-slate-500"
-          style={{ top: staffTop + step * 8 }}
-        />
-      ))}
-      {note.accidental && (
-        <div
-          className="absolute left-[calc(50%-2.75rem)] -translate-y-1/2 text-3xl font-semibold text-slate-950 dark:text-white"
-          style={{ top: top + 10 }}
-        >
-          {note.accidental}
-        </div>
-      )}
-      <div
-        className={`absolute left-1/2 h-5 w-8 -translate-x-1/2 rotate-[-18deg] rounded-full border-2 transition-all duration-300 ${
-          revealed
-            ? 'border-slate-950 bg-slate-950 dark:border-white dark:bg-white'
-            : 'border-slate-400 bg-slate-200 dark:border-slate-500 dark:bg-slate-700'
-        }`}
-        style={{ top }}
-      />
+    <div className="mx-auto grid h-44 w-full max-w-sm place-items-center overflow-hidden rounded-md border border-slate-200 bg-white px-2 py-3 shadow-inner dark:border-slate-700 dark:bg-white">
+      <div ref={containerRef} className="h-[150px] w-[340px]" />
     </div>
   )
 }
@@ -760,7 +775,7 @@ function Practice({ mode, progress, showSheet, onSaveProgress, onExit }) {
                 ) : (
                   <>
                     {showSheet ? (
-                      <StaffPreview note={question.note} revealed />
+                      <StaffPreview note={question.note} />
                     ) : (
                       <div className="mx-auto grid h-44 w-full max-w-sm place-items-center rounded-md border border-slate-700 bg-slate-950 px-8 py-5">
                         <div className="text-center">
