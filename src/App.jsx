@@ -480,6 +480,7 @@ function Home({ progress, onStart, showSheet, onToggleSheet }) {
                 <ToggleLeft className="shrink-0 text-slate-500" size={34} />
               )}
             </button>
+
           </div>
 
           <div className="space-y-4">
